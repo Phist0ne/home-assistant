@@ -414,6 +414,59 @@ def _include_dir_merge_named_yaml(
     return _add_reference_to_node_class(mapping, loader, node)
 
 
+def _merge_recursive(
+    obj: JSON_TYPE,
+    new_obj: JSON_TYPE,
+    node: yaml.nodes.Node,
+    fname: str,
+    path: list | None = None,
+) -> None:
+    if path is None:
+        path = []
+    if isinstance(obj, dict) and isinstance(new_obj, dict):
+        for key in set(obj.keys()).intersection(new_obj.keys()):
+            new_value: JSON_TYPE = new_obj.pop(key)
+            _merge_recursive(obj[key], new_value, node, fname, path + [key])
+        obj.update(new_obj)
+    elif isinstance(obj, list) and isinstance(new_obj, list):
+        obj.extend(new_obj)
+    elif obj.__class__ is new_obj.__class__:  # unsupported type
+        formatted_path = ".".join(path)
+        raise HomeAssistantError(
+            f"{node.start_mark}: Unsupported type for merge ({obj.__class__.__name__}) for value {formatted_path} "
+            f"merging key {fname}."
+        )
+    else:  # type mismatch
+        formatted_path = ".".join(path)
+        raise HomeAssistantError(
+            f"{node.start_mark}: Type mismatch ({obj.__class__.__name__}/{new_obj.__class__.__name__} for value "
+            f"{formatted_path} merging key {fname}."
+        )
+
+
+def _include_dir_merge_recursive_yaml(
+    loader: LoaderType, node: yaml.nodes.Node
+) -> JSON_TYPE:
+    """Load multiple files from directory and merge dictionaries and extend lists.
+
+    Merging is done recursive as deep as the first non dict_object.
+    """
+    result: JSON_TYPE | None = None
+    loc = os.path.join(os.path.dirname(loader.name), node.value)
+    for fname in _find_files(loc, "*.yaml"):
+        if os.path.basename(fname) == SECRET_YAML:
+            continue
+        loaded_yaml = load_yaml(fname, loader.secrets)
+        if result is None:
+            result = loaded_yaml
+        elif loaded_yaml is not None:
+            _merge_recursive(result, loaded_yaml, node, fname)
+    # default to dict if the directory does not contain any yaml files
+    if result is None:
+        result = NodeDictClass()
+    return result
+
+
 def _include_dir_list_yaml(
     loader: LoaderType, node: yaml.nodes.Node
 ) -> list[JSON_TYPE]:
@@ -536,4 +589,5 @@ add_constructor("!include_dir_list", _include_dir_list_yaml)
 add_constructor("!include_dir_merge_list", _include_dir_merge_list_yaml)
 add_constructor("!include_dir_named", _include_dir_named_yaml)
 add_constructor("!include_dir_merge_named", _include_dir_merge_named_yaml)
+add_constructor("!include_dir_merge_recursive", _include_dir_merge_recursive_yaml)
 add_constructor("!input", Input.from_node)
