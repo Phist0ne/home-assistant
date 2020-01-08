@@ -70,7 +70,12 @@ def parse_yaml(content: Union[str, TextIO]) -> JSON_TYPE:
     try:
         # If configuration file is empty YAML returns None
         # We convert that to an empty dict
-        return yaml.load(content, Loader=SafeLineLoader) or OrderedDict()
+        parsed_content = yaml.load(content, Loader=SafeLineLoader)
+        if parsed_content is None:
+            # If configuration file is empty YAML returns None
+            # We convert that to an empty dict
+            return OrderedDict()
+        return parsed_content
     except yaml.YAMLError as exc:
         _LOGGER.error(str(exc))
         raise HomeAssistantError(exc) from exc
